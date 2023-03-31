@@ -1,10 +1,19 @@
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from typing import Literal, Optional
 import open_clip
+import torch
 
 from .flamingo import Flamingo
 from .flamingo_lm import FlamingoLMMixin
 from .utils import extend_instance
 
+from open_clip import transformer
+from torch.nn import functional as F
+
+def LNormforward(self, x: torch.Tensor):
+    #x = F.layer_norm(x.to(torch.float32), self.normalized_shape, self.weight, self.bias, self.eps)
+    return F.layer_norm(x, self.normalized_shape, self.weight, self.bias, self.eps)
+transformer.LayerNormFp32.forward = LNormforward
 
 def create_model_and_transforms(
     clip_vision_encoder_path: str,
@@ -13,7 +22,11 @@ def create_model_and_transforms(
     tokenizer_path: str,
     cross_attn_every_n_layers: int = 1,
     use_local_files: bool = False,
-    decoder_layers_attr_name: str = None,
+    decoder_layers_attr_name: Optional[str] = None,
+    inference: bool = False,
+    precision: Literal["fp16","fp32"] = "fp32",
+    device: str = "cpu",
+    checkpoint_path: Optional[str] = None,
     **flamingo_kwargs,
 ):
     """
@@ -28,13 +41,19 @@ def create_model_and_transforms(
         cross_attn_every_n_layers (int, optional): determines how often to add a cross-attention layer. Defaults to 1.
         use_local_files (bool, optional): whether to use local files. Defaults to False.
         decoder_layers_attr_name (str, optional): name of the decoder layers attribute. Defaults to None.
+        inference (bool, optional): whether to use inference mode. Defaults to True.
+        precision (str, optional): precision to use. Defaults to "fp16".
+        device (str, optional): device to use. Defaults to "cuda".
+        checkpoint_path (str, optional): path to flamingo checkpoint. Defaults to None.
+
     Returns:
         Flamingo: Flamingo model from pretrained vision and language encoders
         Image processor: Pipeline to preprocess input images
         Tokenizer: A tokenizer for the language model
     """
     vision_encoder, _, image_processor = open_clip.create_model_and_transforms(
-        clip_vision_encoder_path, pretrained=clip_vision_encoder_pretrained
+        clip_vision_encoder_path, pretrained=clip_vision_encoder_pretrained,
+        precision=precision, device=device
     )
     # set the vision encoder to output the visual features
     vision_encoder.visual.output_tokens = True
@@ -51,9 +70,11 @@ def create_model_and_transforms(
         # modify labels for the loss.
         text_tokenizer.add_special_tokens({"pad_token": "<PAD>"})
 
+    dtype = torch.float16 if precision == "fp16" else torch.float32
     lang_encoder = AutoModelForCausalLM.from_pretrained(
-        lang_encoder_path, local_files_only=use_local_files
-    )
+        lang_encoder_path, local_files_only=use_local_files,
+        torch_dtype=dtype, # DO NOT EVER USE device_map HERE IT WILL CAUSE HORROR
+    ).to(device)
     extend_instance(lang_encoder, FlamingoLMMixin)
 
     if decoder_layers_attr_name is None:
@@ -78,11 +99,24 @@ def create_model_and_transforms(
     assert sum(p.numel() for p in model.parameters() if p.requires_grad) == 0
 
     # Unfreeze perceiver, gated_cross_attn_layers, and LM input embeddings
-    model.perceiver.requires_grad_(True)
-    model.lang_encoder.gated_cross_attn_layers.requires_grad_(True)
-    model.lang_encoder.get_input_embeddings().requires_grad_(True)
+    model.perceiver.requires_grad_(not inference)
+    model.lang_encoder.gated_cross_attn_layers.requires_grad_(not inference)
+    model.lang_encoder.get_input_embeddings().requires_grad_(not inference)
 
-    print(
+    if checkpoint_path is not None:
+        model.load_state_dict(torch.load(checkpoint_path, map_location=device), strict=False)
+    else:
+        print("WARNING: No checkpoint path provided. Initializing model randomly.")
+
+    # last minute adjustments
+    model.perceiver = model.perceiver.to(device)
+    model.lang_encoder = model.lang_encoder.to(device)
+    if precision == 'fp16':
+        model.vision_encoder = model.vision_encoder.half() # this remains on fp32, don't know why
+        model.lang_encoder = model.lang_encoder.half()
+        model.perceiver = model.perceiver.half()
+
+    print( # this should be zero on inference mode
         f"Flamingo model initialized with {sum(p.numel() for p in model.parameters() if p.requires_grad)} trainable parameters"
     )
 

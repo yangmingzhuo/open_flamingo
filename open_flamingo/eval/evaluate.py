@@ -170,18 +170,21 @@ parser.add_argument("--imagenet_root", type=str, default="/tmp")
 def main():
     args = parser.parse_args()
 
+    device = "cuda:" + str(args.device)
+
     # load model
     flamingo, image_processor, tokenizer = create_model_and_transforms(
-        args.vision_encoder_path,
-        args.vision_encoder_pretrained,
-        args.lm_path,
-        args.lm_tokenizer_path,
-        cross_attn_every_n_layers=args.cross_attn_every_n_layers,
+        clip_vision_encoder_path="ViT-L-14",
+        clip_vision_encoder_pretrained="openai",
+        lang_encoder_path=args.lm_path,
+        tokenizer_path=args.lm_tokenizer_path,
+        cross_attn_every_n_layers=4,
+        # new params
+        inference=True,
+        precision='fp16',
+        device=device,
+        checkpoint_path=args.checkpoint_path,
     )
-
-    checkpoint = torch.load(args.checkpoint_path, map_location="cpu")
-    flamingo.load_state_dict(checkpoint, strict=False)
-    flamingo.to(args.device if args.device >= 0 else "cpu")
 
     results = defaultdict(list)
 
@@ -199,7 +202,7 @@ def main():
                     annotations_json_path=args.flickr_annotations_json_path,
                     num_samples=args.num_samples,
                     num_shots=shot,
-                    device=args.device,
+                    device=device,
                     seed=seed,
                     is_flickr=True,
                 )
@@ -225,7 +228,8 @@ def main():
                     annotations_json_path=args.coco_annotations_json_path,
                     num_samples=args.num_samples,
                     num_shots=shot,
-                    device=args.device,
+                    precision='fp16',
+                    device=device,
                     seed=seed,
                 )
                 print(f"Shots {shot} Trial {trial} CIDEr score: {cider_score}")
@@ -247,7 +251,7 @@ def main():
                     batch_size=args.batch_size,
                     num_samples=args.num_samples,
                     num_shots=shot,
-                    device=args.device,
+                    device=device,
                     seed=seed,
                     image_dir_path=args.ok_vqa_image_dir_path,
                     questions_json_path=args.ok_vqa_questions_json_path,
@@ -273,7 +277,7 @@ def main():
                     batch_size=args.batch_size,
                     num_samples=args.num_samples,
                     num_shots=shot,
-                    device=args.device,
+                    device=device,
                     seed=seed,
                     image_dir_path=args.vqav2_image_dir_path,
                     questions_json_path=args.vqav2_questions_json_path,
@@ -398,9 +402,9 @@ def get_outputs(
 ):
     with torch.inference_mode():
         outputs = model.generate(
-            batch_images.to(device if device >= 0 else "cpu"),
-            input_ids.to(device if device >= 0 else "cpu"),
-            attention_mask=attention_mask.to(device if device >= 0 else "cpu"),
+            batch_images.to(device),
+            input_ids.to(device),
+            attention_mask=attention_mask.to(device),
             max_new_tokens=max_generation_length,
             num_beams=num_beams,
             length_penalty=length_penalty,
@@ -424,7 +428,8 @@ def evaluate_coco_flickr(
     num_samples=5000,
     query_set_size=2048,
     num_shots=8,
-    device=-1,
+    precision="fp32",
+    device="cpu",
     is_flickr=False,
 ):
     """Evaluate a model on COCO dataset.
@@ -467,6 +472,9 @@ def evaluate_coco_flickr(
     )
 
     model.eval()
+
+    # def get_prompt(sample):
+    #     return f"<image>Output:{sample['caption'].strip()}<|endofchunk|>"
 
     def get_prompt(sample):
         return f"<image>Output:{sample['caption'].strip()}<|endofchunk|>"
@@ -521,7 +529,7 @@ def evaluate_coco_flickr(
 
         outputs = get_outputs(
             model=model,
-            batch_images=batch_images,
+            batch_images=batch_images.half() if precision == 'fp16' else batch_images,
             device=device,
             attention_mask=attention_mask,
             max_generation_length=max_generation_length,
@@ -684,9 +692,9 @@ def evaluate_vqa(
             truncation=True,
             max_length=2000,
         )
-        input_ids = encodings["input_ids"].to(device if device >= 0 else "cpu")
+        input_ids = encodings["input_ids"].to(device)
         attention_mask = encodings["attention_mask"].to(
-            device if device >= 0 else "cpu"
+            device
         )
 
         outputs = get_outputs(
@@ -807,7 +815,7 @@ def evaluate_imagenet(
         # This will be more consistent with the evaluation setting in the paper but will require some reworking of the caching.
     )
 
-    device = device if device >= 0 else "cpu"
+    device = device
 
     model.eval()
     # Predictions based on the class target sequence with the maximal
