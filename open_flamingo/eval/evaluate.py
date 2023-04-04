@@ -11,7 +11,7 @@ import more_itertools
 import numpy as np
 import torch
 from coco_metric import compute_cider, postprocess_captioning_generation
-from eval_datasets import COCOFlickrDataset, VQADataset, ImageNetDataset
+from eval_datasets import COCOFlickrDataset, VQADataset, ImageNetDataset, COCODataset
 from tqdm import tqdm
 
 from open_flamingo.eval.ok_vqa_utils import postprocess_ok_vqa_generation
@@ -172,6 +172,13 @@ def main():
 
     device = "cuda:" + str(args.device)
 
+    random.seed(0)
+    np.random.seed(0)
+    torch.manual_seed(0)
+    torch.cuda.manual_seed(0)
+
+    precision = 'fp32'
+
     # load model
     flamingo, image_processor, tokenizer = create_model_and_transforms(
         clip_vision_encoder_path="ViT-L-14",
@@ -181,7 +188,7 @@ def main():
         cross_attn_every_n_layers=4,
         # new params
         inference=True,
-        precision='fp16',
+        precision=precision,
         device=device,
         checkpoint_path=args.checkpoint_path,
     )
@@ -193,6 +200,10 @@ def main():
         for shot in args.shots:
             scores = []
             for seed, trial in zip(args.trial_seeds, range(args.num_trials)):
+                random.seed(seed)
+                np.random.seed(seed)
+                torch.manual_seed(seed)
+                torch.cuda.manual_seed(seed)
                 cider_score = evaluate_coco_flickr(
                     model=flamingo,
                     tokenizer=tokenizer,
@@ -228,7 +239,7 @@ def main():
                     annotations_json_path=args.coco_annotations_json_path,
                     num_samples=args.num_samples,
                     num_shots=shot,
-                    precision='fp16',
+                    precision=precision,
                     device=device,
                     seed=seed,
                 )
@@ -318,7 +329,7 @@ def main():
 
     if args.results_file is not None:
         with open(args.results_file, "w") as f:
-            json.dump(results, f)
+            json.dump(results, f, indent=4)
 
 
 def get_random_indices(num_samples, query_set_size, full_dataset, seed):
@@ -326,9 +337,7 @@ def get_random_indices(num_samples, query_set_size, full_dataset, seed):
         raise ValueError(
             f"num_samples + num_shots must be less than {len(full_dataset)}"
         )
-
-    # get a random subset of the dataset
-    np.random.seed(seed)
+    
     random_indices = np.random.choice(
         len(full_dataset), num_samples + query_set_size, replace=False
     )
@@ -400,15 +409,20 @@ def get_outputs(
     length_penalty,
     input_ids,
 ):
-    with torch.inference_mode():
-        outputs = model.generate(
-            batch_images.to(device),
-            input_ids.to(device),
-            attention_mask=attention_mask.to(device),
-            max_new_tokens=max_generation_length,
-            num_beams=num_beams,
-            length_penalty=length_penalty,
-        )
+    print(input_ids.shape)
+    input_ids = torch.cat((input_ids.requires_grad_(False), torch.nn.Parameter(torch.zeros_like(input_ids[0]))), dim=1)
+
+    outputs = model.generate(
+        batch_images.to(device),
+        input_ids.to(device),
+        attention_mask=attention_mask.to(device),
+        max_new_tokens=max_generation_length,
+        num_beams=num_beams,
+        length_penalty=length_penalty,
+    )
+
+    loss = torch.nn.functional.normalize(outputs.float(), p=2, dim=1)
+    loss.backward()
 
     outputs = outputs[:, len(input_ids[0]) :]
     return outputs
@@ -457,7 +471,7 @@ def evaluate_coco_flickr(
 
     """
 
-    full_dataset = COCOFlickrDataset(
+    full_dataset = COCODataset(
         image_dir_path=image_dir_path,
         annotations_path=annotations_json_path,
         is_flickr=is_flickr,
@@ -476,8 +490,12 @@ def evaluate_coco_flickr(
     # def get_prompt(sample):
     #     return f"<image>Output:{sample['caption'].strip()}<|endofchunk|>"
 
+    prompt_cap = 'captions'
+    # prompt_cap = 'IC_captions'
+    # prompt_cap = 'RT_captions'
+    # prompt_cap = 'clip_captions'
     def get_prompt(sample):
-        return f"<image>Output:{sample['caption'].strip()}<|endofchunk|>"
+        return f"<image>Output:{sample[prompt_cap][0].strip()}<|endofchunk|>"
 
     predictions = defaultdict()
 
@@ -545,10 +563,14 @@ def evaluate_coco_flickr(
         for i, sample in enumerate(batch):
             predictions[sample["image_id"]] = {
                 "caption": new_predictions[i],
+                "prompt_text": batch_text[i],
+                "prompt_images": [img['image_id'] for img in batch_demo_samples[i]],
+                "prompt_texts": [img[prompt_cap][0] for img in batch_demo_samples[i]],
             }
 
     # save the predictions to a temporary file
-    random_uuid = str(uuid.uuid4())
+    # random_uuid = str(uuid.uuid4())
+    random_uuid = "IC_{}".format(num_shots)
     results_path = (
         f"flickrresults_{random_uuid}.json"
         if is_flickr
@@ -558,7 +580,8 @@ def evaluate_coco_flickr(
         f.write(
             json.dumps(
                 [
-                    {"image_id": k, "caption": predictions[k]["caption"]}
+                    {"image_id": k, "caption": predictions[k]["caption"], "prompt_text": predictions[k]["prompt_text"], 
+                        "prompt_images": predictions[k]["prompt_images"], "prompt_texts": predictions[k]["prompt_texts"]}
                     for k in predictions
                 ],
                 indent=4,
@@ -571,7 +594,7 @@ def evaluate_coco_flickr(
     )
 
     # delete the temporary file
-    os.remove(results_path)
+    # os.remove(results_path)
 
     return metrics["CIDEr"] * 100.0
 

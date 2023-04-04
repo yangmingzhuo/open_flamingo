@@ -99,9 +99,9 @@ def create_model_and_transforms(
     assert sum(p.numel() for p in model.parameters() if p.requires_grad) == 0
 
     # Unfreeze perceiver, gated_cross_attn_layers, and LM input embeddings
-    model.perceiver.requires_grad_(not inference)
-    model.lang_encoder.gated_cross_attn_layers.requires_grad_(not inference)
-    model.lang_encoder.get_input_embeddings().requires_grad_(not inference)
+    model.perceiver.requires_grad_(True)
+    model.lang_encoder.gated_cross_attn_layers.requires_grad_(True)
+    model.lang_encoder.get_input_embeddings().requires_grad_(True)
 
     if checkpoint_path is not None:
         model.load_state_dict(torch.load(checkpoint_path, map_location=device), strict=False)
