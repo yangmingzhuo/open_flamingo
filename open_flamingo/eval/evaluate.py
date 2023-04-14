@@ -11,7 +11,7 @@ import more_itertools
 import numpy as np
 import torch
 from coco_metric import compute_cider, postprocess_captioning_generation
-from eval_datasets import COCOFlickrDataset, VQADataset, ImageNetDataset, COCODataset
+from eval_datasets import COCOFlickrDataset, VQADataset, ImageNetDataset, COCOTrainDataset, COCOTestDataset
 from tqdm import tqdm
 
 from open_flamingo.eval.ok_vqa_utils import postprocess_ok_vqa_generation
@@ -177,7 +177,7 @@ def main():
     torch.manual_seed(0)
     torch.cuda.manual_seed(0)
 
-    precision = 'fp32'
+    precision = 'fp16'
 
     # load model
     flamingo, image_processor, tokenizer = create_model_and_transforms(
@@ -240,6 +240,7 @@ def main():
                     num_samples=args.num_samples,
                     num_shots=shot,
                     precision=precision,
+                    results_file=args.results_file,
                     device=device,
                     seed=seed,
                 )
@@ -372,7 +373,12 @@ def get_context_text(
     num_shots,
 ) -> str:
     context_text = (
-        "".join([get_prompt(s) for s in in_context_samples])
+        # GT(WC)
+        "".join([get_prompt(s, s['WC_gt_idx']) for s in in_context_samples])
+        # GT(IP)
+        # "".join([get_prompt(s, s['IP_gt_idx']) for s in in_context_samples])
+        # GT(0)
+        # "".join([get_prompt(s, 0) for s in in_context_samples])
         if effective_num_shots > 0
         else ""
     )
@@ -395,9 +401,14 @@ def prepare_batch_images(batch, image_processor, context_images, num_shots):
     return batch_images
 
 
-def sample_batch_demos_from_query_set(query_set, num_samples, batch_size):
-    return [random.sample(query_set, num_samples) for _ in range(batch_size)]
-
+def sample_batch_demos_from_query_set(query_set, num_samples, batch, clip = False):
+    if not clip:
+        return [[query_set[i] for i in random.sample(range(len(query_set)), num_samples)] for _ in range(len(batch))]
+    else:
+        # SCIR
+        # return [[query_set.id2item(id) for id in batch[i]["clip_caps_imgids"][:num_samples]] for i in range(len(batch))]
+        # SIIR
+        return [[query_set.id2item(id) for id in batch[i]["clip_image_ids"][:num_samples]] for i in range(len(batch))]
 
 def get_outputs(
     model,
@@ -409,20 +420,16 @@ def get_outputs(
     length_penalty,
     input_ids,
 ):
-    print(input_ids.shape)
-    input_ids = torch.cat((input_ids.requires_grad_(False), torch.nn.Parameter(torch.zeros_like(input_ids[0]))), dim=1)
-
-    outputs = model.generate(
-        batch_images.to(device),
-        input_ids.to(device),
-        attention_mask=attention_mask.to(device),
-        max_new_tokens=max_generation_length,
-        num_beams=num_beams,
-        length_penalty=length_penalty,
-    )
-
-    loss = torch.nn.functional.normalize(outputs.float(), p=2, dim=1)
-    loss.backward()
+    
+    with torch.inference_mode():
+        outputs = model.generate(
+            batch_images.to(device),
+            input_ids.to(device),
+            attention_mask=attention_mask.to(device),
+            max_new_tokens=max_generation_length,
+            num_beams=num_beams,
+            length_penalty=length_penalty,
+        )
 
     outputs = outputs[:, len(input_ids[0]) :]
     return outputs
@@ -443,6 +450,7 @@ def evaluate_coco_flickr(
     query_set_size=2048,
     num_shots=8,
     precision="fp32",
+    results_file="results_baseline.json",
     device="cpu",
     is_flickr=False,
 ):
@@ -471,31 +479,35 @@ def evaluate_coco_flickr(
 
     """
 
-    full_dataset = COCODataset(
+    full_dataset = COCOTrainDataset(
         image_dir_path=image_dir_path,
         annotations_path=annotations_json_path,
         is_flickr=is_flickr,
     )
     effective_num_shots = num_shots if num_shots > 0 else 2
-    random_indices = get_random_indices(num_samples, query_set_size, full_dataset, seed)
+    # random_indices = get_random_indices(num_samples, query_set_size, full_dataset, seed)
 
-    in_context_samples, eval_dataset = prepare_eval_samples_and_dataset(
-        full_dataset=full_dataset,
-        random_indices=random_indices,
-        query_set_size=query_set_size,
-    )
+    # in_context_samples, eval_dataset = prepare_eval_samples_and_dataset(
+    #     full_dataset=full_dataset,
+    #     random_indices=random_indices,
+    #     query_set_size=query_set_size,
+    # )
+
+    eval_dataset = COCOTestDataset()
+    # SIIR
+    clip = True
 
     model.eval()
 
-    # def get_prompt(sample):
-    #     return f"<image>Output:{sample['caption'].strip()}<|endofchunk|>"
-
     prompt_cap = 'captions'
-    # prompt_cap = 'IC_captions'
-    # prompt_cap = 'RT_captions'
-    # prompt_cap = 'clip_captions'
-    def get_prompt(sample):
-        return f"<image>Output:{sample[prompt_cap][0].strip()}<|endofchunk|>"
+    # WC
+    # prompt_cap = 'WC_captions'
+    # IP
+    # prompt_cap = 'IP_captions'
+    def get_prompt(sample, idx = 0):
+        # SICR
+        # return f"<image>Output:{sample.strip()}<|endofchunk|>"
+        return f"<image>Output:{sample[prompt_cap][idx].strip()}<|endofchunk|>"
 
     predictions = defaultdict()
 
@@ -503,7 +515,7 @@ def evaluate_coco_flickr(
 
     for batch in more_itertools.chunked(tqdm(eval_dataset, desc=desc), batch_size):
         batch_demo_samples = sample_batch_demos_from_query_set(
-            in_context_samples, effective_num_shots, len(batch)
+            full_dataset, effective_num_shots, batch, clip
         )
 
         context_images = [
@@ -519,6 +531,7 @@ def evaluate_coco_flickr(
             get_context_text(
                 get_prompt,
                 in_context_samples=batch_demo_samples[i],
+                # in_context_samples=batch[i]["clip_caps"][:effective_num_shots],
                 effective_num_shots=effective_num_shots,
                 num_shots=num_shots,
             )
@@ -565,22 +578,25 @@ def evaluate_coco_flickr(
                 "caption": new_predictions[i],
                 "prompt_text": batch_text[i],
                 "prompt_images": [img['image_id'] for img in batch_demo_samples[i]],
-                "prompt_texts": [img[prompt_cap][0] for img in batch_demo_samples[i]],
+                # "prompt_texts": [img[prompt_cap][0] for img in batch_demo_samples[i]],
+                "prompt_texts": [img[prompt_cap][img['WC_gt_idx']] for img in batch_demo_samples[i]],
+                # SICR
+                # "prompt_texts": [batch[i]["clip_caps"][:effective_num_shots] for i in range(len(batch))],
             }
 
     # save the predictions to a temporary file
     # random_uuid = str(uuid.uuid4())
-    random_uuid = "IC_{}".format(num_shots)
+    random_uuid = "{}_{}".format(results_file.split(".")[0], num_shots)
     results_path = (
-        f"flickrresults_{random_uuid}.json"
+        f"{random_uuid}.json"
         if is_flickr
-        else f"cocoresults_{random_uuid}.json"
+        else f"coco{random_uuid}.json"
     )
     with open(results_path, "w") as f:
         f.write(
             json.dumps(
                 [
-                    {"image_id": k, "caption": predictions[k]["caption"], "prompt_text": predictions[k]["prompt_text"], 
+                    {"image_id": k, "caption": predictions[k]["caption"], "prompt_text": predictions[k]["prompt_text"],
                         "prompt_images": predictions[k]["prompt_images"], "prompt_texts": predictions[k]["prompt_texts"]}
                     for k in predictions
                 ],
@@ -590,7 +606,7 @@ def evaluate_coco_flickr(
 
     metrics = compute_cider(
         result_path=results_path,
-        annotations_path=annotations_json_path,
+        annotations_path=eval_dataset.annotations_path,
     )
 
     # delete the temporary file

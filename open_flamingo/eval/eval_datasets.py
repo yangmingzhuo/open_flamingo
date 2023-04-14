@@ -37,68 +37,159 @@ class COCOFlickrDataset(Dataset):
             "image_id": self.annotations[idx]["image_id"],
         }
     
-class COCODataset(Dataset):
+class COCOTrainDataset(Dataset):
     def __init__(
         self,
         image_dir_path="/data/wyl/coco_data/train2014",
+        val_image_dir_path="/data/wyl/coco_data/val2014",
         annotations_path="/data/wyl/coco_data/annotations/captions_train2014.json",
-        clip_captions_path="/data/wyl/clip/clip_top32.json",
-        RT_captions_path="/data/wyl/ImageCaptioning.pytorch/data/coco_ret_caps_cider",
-        IC_captions_path="/data/wyl/open_flamingo/vis.json",
+        val_annotations_path="/data/wyl/coco_data/annotations/captions_val2014.json",
+        train_split_path = '/data/wyl/arctic-captions/splits/coco_train.txt',
+        train_split_path_2 = '/data/wyl/arctic-captions/splits/coco_restval.txt',
+        WC_captions_path="/data/wyl/open_flamingo/wc_vis_80.json",
+        WC_best_gt_path="/data/wyl/open_flamingo/coco-caption/best_gt_WC(80).json",
+        IP_captions_path="/data/wyl/open_flamingo/cocoresults_train_baseline_32.json",
+        IP_best_gt_path="/data/wyl/open_flamingo/coco-caption/best_gt_IP.json",
         is_flickr=False,
     ):
         self.image_dir_path = image_dir_path
-        self.annotations = json.load(open(annotations_path, "r"))["annotations"]
-        self.images = {}
-        self.image_ids = []
-        self.clip_top32 = json.load(open(clip_captions_path, "r"))
-        self.IC_captions = json.load(open(IC_captions_path, "r"))
+        self.val_image_dir_path = val_image_dir_path
+        # use karpathy split 113287
+        self.train_names = []
+        with open(train_split_path, 'r', encoding='utf-8') as f:
+            self.train_names = [i.strip("\n") for i in f.readlines()]
+        with open(train_split_path_2, 'r', encoding='utf-8') as f:
+            self.train_names.extend([i.strip("\n") for i in f.readlines()])      
+        print(len(self.train_names))
 
-        for ann in self.annotations:
-            if not self.images.get(ann["image_id"]):
-                self.images[ann["image_id"]] = {
-                    "captions": [ann["caption"]],
-                    "image_id": ann["image_id"],
-                    "clip_captions": self.clip_top32[str(ann["image_id"])],
-                    "RT_captions": json.load(open(os.path.join(RT_captions_path, str(ann["image_id"]) + ".json"), "r"))["ret"],
-                }
-            else:
-                self.images[ann["image_id"]]["captions"].append(ann["caption"])
-            self.image_ids.append(ann["image_id"])
-
-        for ic in self.IC_captions:
-            if self.images.get(ic['image_id']):
-                self.images[ic['image_id']].update({"IC_captions": [ic["caption"]]})
+        self.imgs = {}
+        for tn in self.train_names:
+            image_id = int(tn.split("_")[2].split(".")[0])
+            self.imgs[image_id] = {"image_id": image_id,
+                                   "captions": [],
+                                   "image": os.path.join(self.image_dir_path, tn) if tn.find("train") != -1 else os.path.join(val_image_dir_path, tn)}
             
-        self.images = list(self.images.values())
+        # add annotation
+        self.annotations = json.load(open(annotations_path, "r"))["annotations"]
+        self.annotations.extend(json.load(open(val_annotations_path, "r"))["annotations"])
+        for ann in self.annotations:
+            if self.imgs.get(ann["image_id"]):
+                self.imgs[ann["image_id"]]["captions"].append(ann["caption"])
+
+        # add caption generate from image caption model
+        self.WC_captions = json.load(open(WC_captions_path, "r"))
+        for wc in self.WC_captions:
+            if self.imgs.get(wc['image_id']):
+                self.imgs[wc['image_id']].update({"WC_captions": [wc["caption"]]})
+
+        # add iterative caption
+        self.IP_captions = json.load(open(IP_captions_path, "r"))
+        for ip in self.IP_captions:
+            if self.imgs.get(ip['image_id']):
+                self.imgs[ip['image_id']].update({"IP_captions": [ip["caption"]]})
+
+        # add gt select form WC IP
+        self.WC_best_gts = json.load(open(WC_best_gt_path, "r"))
+        for wc_gt in self.WC_best_gts:
+            if self.imgs.get(wc_gt['image_id']):
+                self.imgs[wc_gt['image_id']].update({"WC_gt_idx": wc_gt["gt_idx"]})
+        self.IP_best_gts = json.load(open(IP_best_gt_path, "r"))
+        for ip_gt in self.IP_best_gts:
+            if self.imgs.get(ip_gt['image_id']):
+                self.imgs[ip_gt['image_id']].update({"IP_gt_idx": ip_gt["gt_idx"]})
+            
+        self.images = list(self.imgs.values())
         self.is_flickr = is_flickr
 
     def __len__(self):
         return len(self.images)
 
-    def get_img_path(self, idx):
-        if self.is_flickr:
-            return f"{self.image_dir_path}/{self.images[idx]['image_id']}.jpg"
-        else:
-            return f"{self.image_dir_path}/COCO_train2014_{self.images[idx]['image_id']:012d}.jpg"
-
-    def __getitem__(self, idx):
-        image = Image.open(self.get_img_path(idx))
-        img = self.images[idx]
-        captions = img["captions"]
-        clip_captions = img["clip_captions"]
-        RT_captions = img["RT_captions"]
-        IC_captions = img["IC_captions"]
-        image_id = img["image_id"]
+    def id2item(self, idx):
+        image = Image.open(self.imgs[idx]["image"])
         return {
             "image": image,
-            "captions": captions,
-            "clip_captions": clip_captions,
-            "RT_captions": RT_captions,
-            "IC_captions": IC_captions,
-            "image_id": image_id,
+            "captions": self.imgs[idx]["captions"],
+            "image_id": self.imgs[idx]["image_id"],
+            "WC_captions": self.imgs[idx]["WC_captions"],
+            "WC_gt_idx": self.imgs[idx]["WC_gt_idx"],
+            "IP_captions": self.imgs[idx]["IP_captions"],
+            "IP_gt_idx": self.imgs[idx]["IP_gt_idx"],
         }
 
+    def __getitem__(self, idx):
+        image = Image.open(self.images[idx]["image"])
+        return {
+            "image": image,
+            "captions": self.images[idx]["captions"],
+            "image_id": self.images[idx]["image_id"],
+            "WC_captions": self.images[idx]["WC_captions"],
+            "WC_gt_idx": self.images[idx]["WC_gt_idx"],
+            "IP_captions": self.images[idx]["IP_captions"],
+            "IP_gt_idx": self.images[idx]["IP_gt_idx"],
+        }
+    
+class COCOTestDataset(Dataset):
+    def __init__(
+        self,
+        image_dir_path="/data/wyl/coco_data/val2014",
+        annotations_path="/data/wyl/coco_data/annotations/captions_val2014.json",
+        test_split_path = '/data/wyl/arctic-captions/splits/coco_test.txt',
+        clip_ids_path = "/data/wyl/clip/test_topn",
+        clip_caps_path = "/data/wyl/clip/test_img2cap_topn",
+        # recurrent_path = "/data/wyl/open_flamingo/output_CLIP_new/cocoresults_CLIP_32.json",
+        is_flickr=False,
+    ):
+        self.image_dir_path = image_dir_path
+        self.annotations_path = annotations_path
+        self.images = {}
+        # use karpathy split 5000
+        self.test_names = []
+        with open(test_split_path, 'r', encoding='utf-8') as f:
+            self.test_names = [i.strip("\n") for i in f.readlines()] 
+        print(len(self.test_names))
+
+        self.imgs = {}
+        for tn in self.test_names:
+            image_id = int(tn.split("_")[2].split(".")[0])
+            self.imgs[image_id] = {"image_id": image_id,
+                                   "captions": [],
+                                   "image": os.path.join(image_dir_path, tn),
+                                    "clip_image_ids": [i[0] for i in json.load(open(os.path.join(clip_ids_path, str(image_id)+"_sim.json"), "r"))],
+                                    "clip_caps_imgids": [i['image_id'] for i in json.load(open(os.path.join(clip_caps_path, str(image_id)+"_sim.json"), "r"))],
+                                    "clip_caps": [i['caption'] for i in json.load(open(os.path.join(clip_caps_path, str(image_id)+"_sim.json"), "r"))]
+                                    }
+            
+        # add coarse caption from recurrent
+        # self.recurrent_captions = json.load(open(recurrent_path, "r"))
+        # for rc in self.recurrent_captions:
+        #     if self.imgs.get(rc["image_id"]):
+        #         self.imgs[rc["image_id"]].update({"RC_caption": rc["caption"]})
+        #     else:
+        #         raise KeyError
+        # add annotation
+        self.annotations = json.load(open(annotations_path, "r"))["annotations"]
+        for ann in self.annotations:
+            if self.imgs.get(ann["image_id"]):
+                self.imgs[ann["image_id"]]["captions"].append(ann["caption"])
+            
+        self.images = list(self.imgs.values())
+        self.is_flickr = is_flickr
+
+    def __len__(self):
+        return len(self.images)
+
+    def __getitem__(self, idx):
+        image = Image.open(self.images[idx]["image"])
+        return {
+            "image": image,
+            "captions": self.images[idx]["captions"],
+            "image_id": self.images[idx]["image_id"],
+            "clip_image_ids": self.images[idx]["clip_image_ids"],
+            "clip_caps_imgids": self.images[idx]["clip_caps_imgids"],
+            "clip_caps": self.images[idx]["clip_caps"],
+            # "RC_caption": self.images[idx]["RC_caption"],
+        }
+    
 
 class VQADataset(Dataset):
     def __init__(

@@ -2,12 +2,12 @@ LM_PATH="/data/share/pyz/llm_deploy/checkpoints/llama-7b" # llama model path
 LM_TOKENIZER_PATH="/data/share/pyz/llm_deploy/checkpoints/llama-7b" # llama model path
 CKPT_PATH="/data/share/OpenFlamingo/openflamingo_checkpoint.pt"
 # checkpoint model path you can run checkpoint_path = hf_hub_download("openflamingo/OpenFlamingo-9B", "checkpoint.pt") to get
-DEVICE=7 # gpu num
+DEVICE=2 # gpu num
 
 COCO_IMG_PATH="/data/wyl/coco_data/train2014" # coco dataset
 COCO_ANNO_PATH="/data/wyl/coco_data/annotations/captions_train2014.json" # coco dataset
 
-RANDOM_ID="IC"
+RANDOM_ID="SIIR-CLIP-GT(WC80)"
 RESULTS_FILE="results_${RANDOM_ID}.json"
 
 python open_flamingo/eval/evaluate.py \
