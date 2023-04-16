@@ -374,11 +374,11 @@ def get_context_text(
 ) -> str:
     context_text = (
         # GT(WC)
-        "".join([get_prompt(s, s['WC_gt_idx']) for s in in_context_samples])
+        # "".join([get_prompt(s, s['WC_gt_idx']) for s in in_context_samples])
         # GT(IP)
         # "".join([get_prompt(s, s['IP_gt_idx']) for s in in_context_samples])
         # GT(0)
-        # "".join([get_prompt(s, 0) for s in in_context_samples])
+        "".join([get_prompt(s, 0) for s in in_context_samples])
         if effective_num_shots > 0
         else ""
     )
@@ -545,6 +545,7 @@ def evaluate_coco_flickr(
             num_shots=num_shots,
         )
 
+        # batch_text = [f"{context_text[i]}<image>Use vivid description to generate Output:" for i in range(len(batch))]
         batch_text = [f"{context_text[i]}<image>Output:" for i in range(len(batch))]
 
         tokenizer.padding_side = "left"
@@ -578,8 +579,9 @@ def evaluate_coco_flickr(
                 "caption": new_predictions[i],
                 "prompt_text": batch_text[i],
                 "prompt_images": [img['image_id'] for img in batch_demo_samples[i]],
-                # "prompt_texts": [img[prompt_cap][0] for img in batch_demo_samples[i]],
-                "prompt_texts": [img[prompt_cap][img['WC_gt_idx']] for img in batch_demo_samples[i]],
+                "prompt_texts": [img[prompt_cap][0] for img in batch_demo_samples[i]],
+                # GT(WC)
+                # "prompt_texts": [img[prompt_cap][img['WC_gt_idx']] for img in batch_demo_samples[i]],
                 # SICR
                 # "prompt_texts": [batch[i]["clip_caps"][:effective_num_shots] for i in range(len(batch))],
             }

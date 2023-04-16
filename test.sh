@@ -1,0 +1,1 @@
+nohup sh open_flamingo/scripts/run_eval.sh > SIIR-CLIP-GTWC80-new.log 2>&1 &
