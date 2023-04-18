@@ -1,0 +1,14 @@
+[
+    {
+        "image_id": 391895,
+        "caption": " A man riding a bicycle on a mountain road. ",
+        "prompt_text": "<image>Output:A man riding a bicycle on a dirt road.<|endofchunk|><image>Output:A man rides a motorcycle on a mountain road.<|endofchunk|><image>Output:A man riding a bicycle on a dirt road.<|endofchunk|><image>Output:A man riding a bicycle in front of a mountain.<|endofchunk|><image>Output:",
+        "prompt_images": [
+            391895,
+            391895,
+            391895,
+            391895
+        ],
+        "prompt_texts": "<image>Output:A man riding a bicycle on a dirt road.<|endofchunk|><image>Output:A man rides a motorcycle on a mountain road.<|endofchunk|><image>Output:A man riding a bicycle on a dirt road.<|endofchunk|><image>Output:A man riding a bicycle in front of a mountain.<|endofchunk|>"
+    }
+]

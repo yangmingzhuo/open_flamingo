@@ -1,0 +1,32 @@
+{
+    "coco": [
+        {
+            "shots": 4,
+            "trials": [
+                0.0
+            ],
+            "mean": 0.0
+        },
+        {
+            "shots": 8,
+            "trials": [
+                0.0
+            ],
+            "mean": 0.0
+        },
+        {
+            "shots": 16,
+            "trials": [
+                0.0
+            ],
+            "mean": 0.0
+        },
+        {
+            "shots": 32,
+            "trials": [
+                0.0
+            ],
+            "mean": 0.0
+        }
+    ]
+}

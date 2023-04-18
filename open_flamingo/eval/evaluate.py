@@ -405,7 +405,7 @@ def sample_batch_demos_from_query_set(query_set, num_samples, batch, clip = Fals
     if not clip:
         return [[query_set[i] for i in random.sample(range(len(query_set)), num_samples)] for _ in range(len(batch))]
     else:
-        # SCIR
+        # SICR
         # return [[query_set.id2item(id) for id in batch[i]["clip_caps_imgids"][:num_samples]] for i in range(len(batch))]
         # SIIR
         return [[query_set.id2item(id) for id in batch[i]["clip_image_ids"][:num_samples]] for i in range(len(batch))]
@@ -495,7 +495,7 @@ def evaluate_coco_flickr(
 
     eval_dataset = COCOTestDataset()
     # SIIR
-    clip = True
+    clip = False
 
     model.eval()
 
@@ -531,6 +531,7 @@ def evaluate_coco_flickr(
             get_context_text(
                 get_prompt,
                 in_context_samples=batch_demo_samples[i],
+                # SICR
                 # in_context_samples=batch[i]["clip_caps"][:effective_num_shots],
                 effective_num_shots=effective_num_shots,
                 num_shots=num_shots,
@@ -579,11 +580,7 @@ def evaluate_coco_flickr(
                 "caption": new_predictions[i],
                 "prompt_text": batch_text[i],
                 "prompt_images": [img['image_id'] for img in batch_demo_samples[i]],
-                "prompt_texts": [img[prompt_cap][0] for img in batch_demo_samples[i]],
-                # GT(WC)
-                # "prompt_texts": [img[prompt_cap][img['WC_gt_idx']] for img in batch_demo_samples[i]],
-                # SICR
-                # "prompt_texts": [batch[i]["clip_caps"][:effective_num_shots] for i in range(len(batch))],
+                "prompt_texts": context_text[i],
             }
 
     # save the predictions to a temporary file

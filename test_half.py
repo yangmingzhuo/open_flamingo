@@ -1,12 +1,12 @@
-from open_flamingo import create_model_and_transforms
+from open_flamingo import create_model_and_transforms_half
 from huggingface_hub import hf_hub_download
 import time
 
 llama_path = "/data/share/pyz/llm_deploy/checkpoints/llama-7b"
 
-device = 'cpu'
+device = 'cuda:5'
 
-model, image_processor, tokenizer = create_model_and_transforms(
+model, image_processor, tokenizer = create_model_and_transforms_half(
     clip_vision_encoder_path="ViT-L-14",
     clip_vision_encoder_pretrained="openai",
     lang_encoder_path=llama_path,
@@ -14,9 +14,9 @@ model, image_processor, tokenizer = create_model_and_transforms(
     cross_attn_every_n_layers=4,
     # new params
     inference=True,
-    precision='fp32',
+    precision='fp16',
     device=device,
-    checkpoint_path="/data/share/OpenFlamingo/openflamingo_checkpoint.pt",
+    checkpoint_path=hf_hub_download("openflamingo/OpenFlamingo-9B", "checkpoint.pt"),
 )
 
 # grab model checkpoint from huggingface hub
@@ -30,20 +30,20 @@ Step 1: Load images
 """
 demo_image_one = Image.open(
     requests.get(
-        "http://images.cocodataset.org/train2017/000000568041.jpg", stream=True
+        "http://images.cocodataset.org/val2017/000000039769.jpg", stream=True
     ).raw
 )
 
-# demo_image_two = Image.open(
-#     requests.get(
-#         "http://images.cocodataset.org/val2014/000000391895.jpg",
-#         stream=True
-#     ).raw
-# )
+demo_image_two = Image.open(
+    requests.get(
+        "http://images.cocodataset.org/test-stuff2017/000000028137.jpg",
+        stream=True
+    ).raw
+)
 
 query_image = Image.open(
     requests.get(
-        "http://images.cocodataset.org/train2017/000000391895.jpg", 
+        "http://images.cocodataset.org/test-stuff2017/000000028352.jpg", 
         stream=True
     ).raw
 )
@@ -58,7 +58,7 @@ Details: For OpenFlamingo, we expect the image to be a torch tensor of shape
  channels = 3, height = 224, width = 224.
 """
 time_begin = time.time()
-vision_x = [image_processor(demo_image_one).unsqueeze(0), image_processor(query_image).unsqueeze(0)]
+vision_x = [image_processor(demo_image_one).unsqueeze(0), image_processor(demo_image_two).unsqueeze(0), image_processor(query_image).unsqueeze(0)]
 vision_x = torch.cat(vision_x, dim=0)
 vision_x = vision_x.unsqueeze(1).unsqueeze(0)
 
@@ -70,7 +70,7 @@ Details: In the text we expect an <image> special token to indicate where an ima
 """
 tokenizer.padding_side = "left" # For generation padding tokens should be on the left
 lang_x = tokenizer(
-    ["<image>Output:A man riding a motorcycle on a dirt road.<|endofchunk|><image>Output:"],
+    ["<image>An image of two cats.<|endofchunk|><image>An image of a bathroom sink.<|endofchunk|><image>An image of"],
     return_tensors="pt",
 )
 
@@ -79,7 +79,7 @@ lang_x = tokenizer(
 Step 4: Generate text
 """
 generated_text = model.generate(
-    vision_x=vision_x.to(device),
+    vision_x=vision_x.to(device).half(),
     lang_x=lang_x["input_ids"].to(device),
     attention_mask=lang_x["attention_mask"].to(device),
     max_new_tokens=20,
