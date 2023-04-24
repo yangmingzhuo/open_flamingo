@@ -2,7 +2,7 @@ from pycocotools.coco import COCO
 from pycocoevalcap.eval import COCOEvalCap
 
 annFile = '/data/wyl/open_flamingo/coco-caption/captions_trainval2014.json'
-resFile = '/data/wyl/open_flamingo/cocoresults_train_baseline_32.json'
+resFile = '/data/wyl/open_flamingo/cocoresults_train_baseline_0.json'
 coco = COCO(annFile)
 cocoRes = coco.loadRes(resFile)
 

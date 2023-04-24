@@ -189,7 +189,7 @@ class CiderScorer(object):
             # append score of an image to the score list
             scores.append(score_avg)
         import json
-        json.dump(best_gt_idx, open("/data/wyl/open_flamingo/coco-caption/best_gt_IP.json", "w"))
+        json.dump(best_gt_idx, open("/data/wyl/open_flamingo/coco-caption/best_gt_IP_0.json", "w"))
         return scores
 
     def compute_score(self, option=None, verbose=0):

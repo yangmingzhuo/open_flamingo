@@ -239,6 +239,7 @@ def main():
                     annotations_json_path=args.coco_annotations_json_path,
                     num_samples=args.num_samples,
                     num_shots=shot,
+                    num_beams=3,
                     precision=precision,
                     results_file=args.results_file,
                     device=device,
@@ -495,7 +496,7 @@ def evaluate_coco_flickr(
 
     eval_dataset = COCOTestDataset()
     # SIIR
-    clip = False
+    clip = True
 
     model.eval()
 

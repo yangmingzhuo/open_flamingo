@@ -46,10 +46,10 @@ class COCOTrainDataset(Dataset):
         val_annotations_path="/data/wyl/coco_data/annotations/captions_val2014.json",
         train_split_path = '/data/wyl/arctic-captions/splits/coco_train.txt',
         train_split_path_2 = '/data/wyl/arctic-captions/splits/coco_restval.txt',
-        WC_captions_path="/data/wyl/open_flamingo/wc_vis_135.json",
-        WC_best_gt_path="/data/wyl/open_flamingo/coco-caption/best_gt_WC(135).json",
-        IP_captions_path="/data/wyl/open_flamingo/cocoresults_train_baseline_32.json",
-        IP_best_gt_path="/data/wyl/open_flamingo/coco-caption/best_gt_IP.json",
+        WC_captions_path="/data/wyl/open_flamingo/wc_vis_80.json",
+        WC_best_gt_path="/data/wyl/open_flamingo/coco-caption/best_gt_WC(80).json",
+        IP_captions_path="/data/wyl/open_flamingo/cocoresults_train_baseline_0.json",
+        IP_best_gt_path="/data/wyl/open_flamingo/coco-caption/best_gt_IP_0.json",
         is_flickr=False,
     ):
         self.image_dir_path = image_dir_path
@@ -134,7 +134,7 @@ class COCOTestDataset(Dataset):
         image_dir_path="/data/wyl/coco_data/val2014",
         annotations_path="/data/wyl/coco_data/annotations/captions_val2014.json",
         test_split_path = '/data/wyl/arctic-captions/splits/coco_test.txt',
-        clip_ids_path = "/data/wyl/clip/test_topn",
+        clip_ids_path = "/data/wyl/clip/test_cluster_top32",
         clip_caps_path = "/data/wyl/clip/test_img2capIP_topn",
         # recurrent_path = "/data/wyl/open_flamingo/output_CLIP_new/cocoresults_CLIP_32.json",
         is_flickr=False,
@@ -154,7 +154,7 @@ class COCOTestDataset(Dataset):
             self.imgs[image_id] = {"image_id": image_id,
                                    "captions": [],
                                    "image": os.path.join(image_dir_path, tn),
-                                    "clip_image_ids": [i[0] for i in json.load(open(os.path.join(clip_ids_path, str(image_id)+"_sim.json"), "r"))],
+                                    "clip_image_ids": [i[0] for i in json.load(open(os.path.join(clip_ids_path, str(image_id)+".json"), "r"))],
                                     "clip_caps_imgids": [i['image_id'] for i in json.load(open(os.path.join(clip_caps_path, str(image_id)+"_sim.json"), "r"))],
                                     "clip_caps": [i['caption'] for i in json.load(open(os.path.join(clip_caps_path, str(image_id)+"_sim.json"), "r"))]
                                     }
@@ -185,8 +185,8 @@ class COCOTestDataset(Dataset):
             "captions": self.images[idx]["captions"],
             "image_id": self.images[idx]["image_id"],
             "clip_image_ids": self.images[idx]["clip_image_ids"],
-            "clip_caps_imgids": self.images[idx]["clip_caps_imgids"],
-            "clip_caps": self.images[idx]["clip_caps"],
+            # "clip_caps_imgids": self.images[idx]["clip_caps_imgids"],
+            # "clip_caps": self.images[idx]["clip_caps"],
             # "RC_caption": self.images[idx]["RC_caption"],
         }
     

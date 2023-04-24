@@ -1,5 +1,6 @@
 *.pt
 cocoresults_train_baseline_32.json
+cocoresults_train_baseline_0.json
 wandb/
 
 # Byte-compiled / optimized / DLL files
